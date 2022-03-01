@@ -32,6 +32,7 @@
 #define EDITOR_LOG_H
 
 #include "core/os/thread.h"
+#include "modules/regex/regex.h"
 #include "scene/gui/box_container.h"
 #include "scene/gui/button.h"
 #include "scene/gui/label.h"
@@ -127,6 +128,7 @@ private:
 	};
 
 	Vector<LogMessage> messages;
+	RegEx resource_path_regex;
 	// Maps MessageTypes to LogFilters for convenient access and storage (don't need 1 member per filter).
 	HashMap<MessageType, LogFilter *> type_filter_map;
 
@@ -161,6 +163,7 @@ private:
 
 	void _rebuild_log();
 	void _add_log_line(LogMessage &p_message, bool p_replace_previous = false);
+	void _resource_path_clicked(Variant path);
 
 	void _set_filter_active(bool p_active, MessageType p_message_type);
 	void _set_search_visible(bool p_visible);
