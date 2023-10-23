@@ -32,12 +32,16 @@
 #define AREA_2D_EDITOR_PLUGIN_H
 
 #include "editor/editor_plugin.h"
-#include "scene/2d/area_2d.h"
 
+class Area2D;
 class CanvasItemEditor;
 
 class Area2DEditorPlugin : public EditorPlugin {
 	GDCLASS(Area2DEditorPlugin, EditorPlugin)
+
+	StringName grav_vec_pname = StringName("gravity_point_center");
+	StringName grav_ispt_pname = StringName("gravity_point");
+	StringName grav_dist_pname = StringName("gravity_point_unit_distance");
 
 	CanvasItemEditor *canvas_item_editor = nullptr;
 	Area2D *node = nullptr;
@@ -49,9 +53,9 @@ class Area2DEditorPlugin : public EditorPlugin {
 
 	Action action;
 	Point2 moving_from;
-	Point2 moving_screen_from;
-
-	void _node_visibility_changed();
+	Point2 moving_mouse_from;
+	
+	void _property_edited(const StringName &p_prop);
 
 public:
 	virtual bool forward_canvas_gui_input(const Ref<InputEvent> &p_event) override;
@@ -62,9 +66,6 @@ public:
 	virtual void edit(Object *p_object) override;
 	virtual bool handles(Object *p_object) const override { return p_object->is_class("Area2D"); }
 	virtual void make_visible(bool p_visible) override;
-
-	Area2DEditorPlugin();
-	~Area2DEditorPlugin();
 };
 
 #endif // AREA_2D_EDITOR_PLUGIN_H

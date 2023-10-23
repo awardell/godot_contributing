@@ -30,32 +30,42 @@
 
 #include "area_2d_editor_plugin.h"
 
-#include "canvas_item_editor_plugin.h"
+#include "editor/editor_interface.h"
 #include "editor/editor_settings.h"
 #include "editor/editor_undo_redo_manager.h"
+#include "editor/inspector_dock.h"
+#include "editor/plugins/canvas_item_editor_plugin.h"
+#include "scene/2d/area_2d.h"
+
 
 bool Area2DEditorPlugin::forward_canvas_gui_input(const Ref<InputEvent> &p_event) {
-	if (!node || !node->is_visible_in_tree() || !node->is_gravity_a_point()) {
+	if (!node || !node->is_visible_in_tree() || !node->is_gravity_a_point()
+		|| node->get_gravity_space_override_mode() == Area2D::SpaceOverride::SPACE_OVERRIDE_DISABLED) {
 		return false;
 	}
 
-	real_t grab_threshold = EDITOR_GET("editors/polygon_editor/point_grab_radius");
-	grab_threshold = grab_threshold * grab_threshold;
-
 	Ref<InputEventMouseButton> mb = p_event;
 	if (mb.is_valid()) {
+		if (action == Action::ACTION_MOVING_POINT && mb->get_button_index() == MouseButton::RIGHT) {
+			return true;
+		}
+
 		Transform2D xform = canvas_item_editor->get_canvas_transform() * node->get_global_transform();
 
-		Vector2 gpoint = mb->get_position();
+		Vector2 mpos = mb->get_position();
 		Vector2 point = xform.xform(node->get_gravity_point_center());
+		Vector2 mposxd = xform.affine_inverse().xform(mpos);
+
+		real_t grab_threshold = EDITOR_GET("editors/polygon_editor/point_grab_radius");
+		grab_threshold = grab_threshold * grab_threshold;
 
 		// Check for gravity point movement start.
-		if (mb->is_pressed() && mb->get_button_index() == MouseButton::LEFT && action == ACTION_NONE) {
-			real_t dist_to_p = gpoint.distance_squared_to(point);
+		if (action == ACTION_NONE && mb->is_pressed() && mb->get_button_index() == MouseButton::LEFT) {
+			real_t dist_to_p = mpos.distance_squared_to(point);
 			if (dist_to_p < grab_threshold) {
 				action = ACTION_MOVING_POINT;
 				moving_from = node->get_gravity_point_center();
-				moving_screen_from = gpoint;
+				moving_mouse_from = mposxd;
 
 				canvas_item_editor->update_viewport();
 				return true;
@@ -63,9 +73,9 @@ bool Area2DEditorPlugin::forward_canvas_gui_input(const Ref<InputEvent> &p_event
 		}
 
 		// Check for gravity point movement completion.
-		if (!mb->is_pressed() && mb->get_button_index() == MouseButton::LEFT && action == ACTION_MOVING_POINT) {
+		if (action == ACTION_MOVING_POINT && !mb->is_pressed() && mb->get_button_index() == MouseButton::LEFT) {
 			EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
-			Vector2 new_pos = moving_from + xform.affine_inverse().basis_xform(gpoint - moving_screen_from);
+			Vector2 new_pos = moving_from + mposxd - moving_mouse_from;
 
 			undo_redo->create_action(TTR("Move Gravity Point Center"));
 			undo_redo->add_do_method(node, "set_gravity_point_center", new_pos);
@@ -83,8 +93,8 @@ bool Area2DEditorPlugin::forward_canvas_gui_input(const Ref<InputEvent> &p_event
 	Ref<InputEventMouseMotion> mm = p_event;
 	if (mm.is_valid() && action == ACTION_MOVING_POINT) {
 		Transform2D xform = canvas_item_editor->get_canvas_transform() * node->get_global_transform();
-		Vector2 gpoint = mm->get_position();
-		Vector2 new_pos = moving_from + xform.affine_inverse().basis_xform(gpoint - moving_screen_from);
+		Vector2 new_pos = moving_from + xform.affine_inverse().xform(mm->get_position()) - moving_mouse_from;
+
 		node->set_gravity_point_center(new_pos);
 
 		canvas_item_editor->update_viewport();
@@ -95,7 +105,8 @@ bool Area2DEditorPlugin::forward_canvas_gui_input(const Ref<InputEvent> &p_event
 }
 
 void Area2DEditorPlugin::forward_canvas_draw_over_viewport(Control *p_overlay) {
-	if (!node || !node->is_visible_in_tree() || !node->is_gravity_a_point()) {
+	if (!node || !node->is_visible_in_tree() || !node->is_gravity_a_point()
+		|| node->get_gravity_space_override_mode() == Area2D::SpaceOverride::SPACE_OVERRIDE_DISABLED) {
 		return;
 	}
 
@@ -115,43 +126,34 @@ void Area2DEditorPlugin::forward_canvas_draw_over_viewport(Control *p_overlay) {
 	vpc->draw_texture_rect(gravity_point_handle, Rect2(point - handle_size * 0.5, handle_size));
 }
 
+void Area2DEditorPlugin::_property_edited(const StringName &p_prop) {
+	if (p_prop == grav_vec_pname || p_prop == grav_ispt_pname || p_prop == grav_dist_pname) {
+		canvas_item_editor->update_viewport();
+	}
+}
+
 void Area2DEditorPlugin::edit(Object *p_object) {
 	if (!canvas_item_editor) {
 		canvas_item_editor = CanvasItemEditor::get_singleton();
 	}
 	action = Action::ACTION_NONE;
+	node = p_object ? Object::cast_to<Area2D>(p_object) : nullptr;
 
 	if (p_object) {
 		node = Object::cast_to<Area2D>(p_object);
-		if (!node->is_connected("visibility_changed", callable_mp(this, &Area2DEditorPlugin::_node_visibility_changed))) {
-			node->connect("visibility_changed", callable_mp(this, &Area2DEditorPlugin::_node_visibility_changed));
+		EditorInspector* insp = get_editor_interface()->get_inspector();
+		if (!insp->is_connected("property_edited", callable_mp(this, &Area2DEditorPlugin::_property_edited))) {
+			insp->connect("property_edited", callable_mp(this, &Area2DEditorPlugin::_property_edited));
 		}
-
-	} else {
-		// node may have been deleted at this point
-		if (node && node->is_connected("visibility_changed", callable_mp(this, &Area2DEditorPlugin::_node_visibility_changed))) {
-			node->disconnect("visibility_changed", callable_mp(this, &Area2DEditorPlugin::_node_visibility_changed));
-		}
+		canvas_item_editor->update_viewport();
+	}
+	else {
 		node = nullptr;
 	}
-}
-
-void Area2DEditorPlugin::_node_visibility_changed() {
-	if (!node) {
-		return;
-	}
-
-	canvas_item_editor->update_viewport();
 }
 
 void Area2DEditorPlugin::make_visible(bool p_visible) {
 	if (!p_visible) {
 		edit(nullptr);
 	}
-}
-
-Area2DEditorPlugin::Area2DEditorPlugin() {
-}
-
-Area2DEditorPlugin::~Area2DEditorPlugin() {
 }
